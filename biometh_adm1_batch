@@ -1,0 +1,506 @@
+% Written by Dr. Gabriel Capson-Tojo (gabriel.capson-tojo@inrae.fr)
+% Last version: 19/06/2024
+% Modifications from Capson-Tojo et al. (2021) marked by !!!!!!!
+
+% Model definition
+
+function [f,tout,pHout] = biometh_adm1_batch(t,y,tu,u,Vliq,Vgas)
+% Organise the input so that it can handle the time steppin
+% via interpolation of flowrates according to time steps
+    u = interp1(tu,u,t);
+
+    persistent t_list pH_list
+    if t==0
+        clear tlist pHlist
+    end
+    t_list = [t_list;t];
+
+%% State variables
+Ssu = y(1);
+Saa = y(2);
+Sfa = y(3);
+Sva = y(4);
+Sbu = y(5);
+Spro = y(6);
+Sac = y(7);
+Sh2 = y(8);
+Sch4 = y(9);
+SIC = y(10);
+SIN = y(11);
+SI = y(12);
+Xc = y(13);
+Xch = y(14);
+Xpr = y(15);
+Xli = y(16);
+Xsu = y(17);
+Xaa = y(18);
+Xfa = y(19);
+Xc4 = y(20);
+Xpro = y(21);
+Xac = y(22);
+Xh2_slow_high = y(23);
+XI = y(24);
+Scat = y(25); 
+San = y(26);
+Sva_ = y(27);
+Sbu_ = y(28);
+Spro_ = y(29);
+Sac_ = y(30);
+SHCO3_ = y(31);
+SNH3 = y(32);
+H2_gas = y(33);
+CH4_gas = y(34);
+CO2_gas = y(35);
+% added compared to ADM1
+XSAO = y(36);
+Xc5 = y(37);
+Xh2_fast_low = y(38);  %!!!!!!!!!!!!!!!!!!!
+SN2 = y(39);
+N2_gas = y(40);
+
+%% Substrate fractionation (to account for endogenous)
+f_sI_xc = 0.00; %
+f_xI_xc = 0.00; % 0.45 (approx from substrate of previous batch)
+f_ch_xc = 0.34; % 0.22
+f_pr_xc = 0.33; % 0.1650
+f_li_xc = 0.33; % 0.1650
+
+%% Operational conditions (the rest are in input file)
+T_op = 35+273.15;
+
+%% Stoichiometric parameters(yields products, yields biomass)
+% Stoichiometric parameters 
+f_fa_li = 0.95;% ADM1
+f_h2_su = 0.19;% ADM1
+f_bu_su = 0.13;% ADM1
+f_pro_su= 0.27;% ADM1
+f_ac_su = 0.41;% ADM1
+f_h2_aa = 0.06;% ADM1
+f_va_aa = 0.23;% ADM1
+f_bu_aa = 0.26;% ADM1
+f_pro_aa= 0.05;% ADM1
+f_ac_aa = 0.40;% ADM1
+% Nitrogen contents 
+N_xc = 0.0376/14; % Rosen
+N_I = 0.06/14; % ADM1
+N_aa = 0.007;% ADM1
+N_bac = 0.08/14;% Rosen
+N_pr = N_aa;
+% Carbon contents (Rosen)
+C_xc = 0.02786;
+C_sI = 0.03; 
+C_ch = 0.0313;
+C_pr = 0.03;
+C_li = 0.022;
+C_xI = 0.03;
+C_su = 0.0313;
+C_aa = 0.03;
+C_fa = 0.0217;
+C_bu = 0.025;
+C_pro = 0.0268;
+C_ac = 0.0313;
+C_bac = 0.0313;
+C_va = 0.024;
+C_ch4 = 0.0156;
+% Yields
+Y_su = 0.1;% ADM1
+Y_aa = 0.08;% ADM1
+Y_fa = 0.06;% ADM1
+Y_c4 = 0.06;% ADM1
+Y_pro = 0.04;% ADM1
+Y_ac = 0.05;% ADM1
+Y_h2 = 0.06;% ADM1 ; Assumed as equal for both hydrogenotrophs !!!!!!!!!!!
+Y_SAO = 0.104;% Rivera-Salvador (2014); 0.05
+Y_c5 = 0.06;% As for c4
+
+%% Biochemical parameter values
+% Extracellular (1st order)
+k_dis = 0.2; % ADM1 0.5
+k_hyd_ch = 5; % ADM1 10
+k_hyd_pr = 5; % ADM1 10
+k_hyd_li = 5; % ADM1 10
+% Monod kinetics
+k_m_su = 30; % ADM1
+k_m_aa = 50; % ADM1
+k_m_fa = 6; % ADM1
+k_m_c4 = 20; % ADM1 
+k_m_ac = 8; % ADM1
+k_m_pro = 13; % ADM1
+k_m_h2_slow_high = 12; % ADM1 35
+k_m_h2_fast_low = 34.9; %
+k_m_SAO = 3.25;% Rivera-Salvador (2014)
+k_m_c5 = 20; % As for c4
+K_S_su = 0.5; % ADM1
+K_S_aa = 0.3; % ADM1
+K_S_fa = 0.4; % ADM1
+K_S_c4 = 0.2; % ADM1
+K_S_pro= 0.1; % ADM1;
+K_S_ac = 0.15; % ADM1; Zhao (2019) 10.1016/j.biortech.2018.09.091 : 2
+K_S_h2_slow_high = 7e-8; %  ADM1
+K_S_h2_fast_low = 1e-5; % !!!!!!!!!!!!!!!!!!!!!!!!
+K_S_SAO = 0.3; % Capson-Tojo (2021); Rivera-Salvador (2014)
+K_S_c5 = 0.2; % As for c4
+% Inhibition
+K_S_IN = 1e-4; % ADM1; Inhibition constant to limit growth if there is no N
+K_Ih2_fa = 5e-6; % ADM1 (Rosen)
+K_Ih2_c4 = 1e-5; % ADM1
+K_Ih2_c5 = 1e-5; % As for c4
+K_Ih2_pro = 2.54e-6; % ADM13.5e-06
+K_Ih2_ac = 5.5e-06; % Rivera-Salvador (2014);
+K_I_nh3_min_aceto = 0.006/14; % gFAN-N/L % Values our study biblio NH3
+%assuming same inhibitory factors for both hydrogenotrophic clades
+K_I_nh3_max_aceto = 0.0019974; % 0.0109 gFAN-N/L
+K_I_nh3_min_h2 = 0.175/14; % gFAN-N/L
+K_I_nh3_max_h2 = 4.387/14; % gFAN/L
+%
+pH_UL_ac = 7; % ADM1; aceticlastic
+pH_LL_ac = 6; % ADM1
+pH_UL_aa = 5.5; % ADM1; acetogenesis
+pH_LL_aa = 4; % ADM1
+pH_UL_h2 = 6; % ADM1; hydrogenotrophic
+pH_LL_h2 = 5; % ADM1
+% Decay
+k_dec_all = 0.02; % ADM1
+k_dec_Xsu = k_dec_all;
+k_dec_Xaa = k_dec_all;
+k_dec_Xfa = k_dec_all;
+k_dec_Xc4 = k_dec_all;
+k_dec_Xpro= k_dec_all;
+k_dec_Xac = k_dec_all;
+k_dec_Xh2 = k_dec_all;
+k_dec_SAO = k_dec_all;
+k_dec_Xc5 = k_dec_all;
+
+%% Physicochemical parameter values
+P_atm = 1.013;
+R = 0.08314;
+T_base = 298.15;
+
+% Equilibrium coefficients and constants
+% Acid-base rates
+k_A_Bva = 1e10; %STR; ADM1 1e8
+k_A_Bbu = 1e10; %STR; ADM1 1e8  
+k_A_Bpro= 1e10; %STR; ADM1 1e8
+k_A_Bac = 1e10; %STR; ADM1 1e8
+k_A_Bco2= 1e10; %STR; ADM1 1e8
+k_A_BIN = 1e10; %STR; ADM1 1e8
+% Acid-base equilibrium constants (Rosen)
+pK_w_base    = 14.0;
+pK_a_va_base = 4.86;
+pK_a_bu_base = 4.82;
+pK_a_pro_base= 4.88;
+pK_a_ac_base = 4.76;
+pK_a_co2_base= 6.35;
+pK_a_IN_base = 9.25;
+K_a_va  = 10^(-pK_a_va_base);
+K_a_bu  = 10^(-pK_a_bu_base);
+K_a_pro = 10^(-pK_a_pro_base);
+K_a_ac  = 10^(-pK_a_ac_base);
+% Gas transfer coefficients (Rosen)
+K_H_h2_base  = 7.84e-4;%(mol/L/bar)
+K_H_ch4_base = 0.0014;
+K_H_co2_base = 0.035;
+K_H_N2_base = 0.00060*0.9970; %(mol/L/bar) CHECK!!!!!!!!!!!!!!!!!
+K_H_h2o_base = 0.0313;
+kLa = 10*24; % Rosen 200; measured 10 d-1
+
+%% Temperature correction in parameters (Rosen)
+factor = (1.0/T_base - 1.0/T_op)/(100.0*R);
+K_a_co2 = 10^(-pK_a_co2_base)*exp(7674*factor);
+K_a_IN = 10^(-pK_a_IN_base)*exp(51965*factor);
+K_w   = 10^(-pK_w_base)*exp(55900.0*factor);
+% T adjustement for water vapour saturation pressure (Rosen)
+P_gas_h2o = K_H_h2o_base*exp(5290.0*(1.0/T_base - 1.0/T_op));
+K_H_h2 = K_H_h2_base*exp(-4180.0*factor);     % T adjustment for K_H_h2 
+K_H_ch4 = K_H_ch4_base*exp(-14240.0*factor);  % T adjustment for K_H_ch4 
+K_H_co2 = K_H_co2_base*exp(-19410.0*factor);  % T adjustment for K_H_co2 
+K_H_N2 = K_H_N2_base*exp(530*((1/T_op)-(1/T_base)));
+
+%% Algebraic: Davies for FAN calculation
+A = 1.82*10^6*((74.828*T_op)^(-3/2)); % Correct dielectric constant according to T
+I = 1/2*2*(Scat+(SIN-SNH3)); % considering only cations
+f_davies = 10^(-A*((sqrt(I)/(1+sqrt(I))-0.1276*I)));
+K_a_IN_corr = K_a_IN*f_davies;
+
+%% Algebraic: pH calculation
+phi = Scat+(SIN-SNH3)-SHCO3_-Sac_/64.0-Spro_/112.0-Sbu_/160.0-Sva_/208.0-San;
+S_H_ion = -phi*0.5+0.5*sqrt(phi*phi+4.0*K_w);            % SH+ 
+pH_reactor = -log10(S_H_ion);
+%pH_reactor = 7;
+pH_list = [pH_list;pH_reactor]; 
+
+%% Gas transfer
+    % H2 
+    kLa_H2 = kLa*(((5.11*10^-5)/(2.42*10^-5))^(1/2)); %d-1; 
+    P_gas_H2 = H2_gas*R*T_op/16.0; %bar
+    H2_sat = K_H_h2*P_gas_H2*16; %kg COD/m3
+    % CO2
+    kLa_CO2 = kLa*(((1.91*10^-5)/(2.42*10^-5))^(1/2)); %d-1;
+    P_gas_co2 = CO2_gas*R*T_op; %bar
+    CO2_sat = K_H_co2*P_gas_co2; %kmolC/m3
+    % CH4
+    kLa_CH4 = kLa*(((1.84*10^-5)/(2.42*10^-5))^(1/2)); %d-1;
+    P_gas_ch4 = CH4_gas*R*T_op/64.0; %bar
+    CH4_sat = K_H_ch4*P_gas_ch4*64; %kg COD/m3
+    % N2
+    kLa_N2 = kLa*(((2.00*10^-5)/(2.42*10^-5))^(1/2));
+    P_gas_N2 = N2_gas*R*T_op; %bar
+    N2_sat = K_H_N2*P_gas_N2*2; %kmolN/m3  
+%P_gas = P_gas_h2 + P_gas_ch4 + P_gas_co2 + P_gas_h2o;  
+%q_gas = 5e4*(P_gas - P_atm)*P_gas/P_atm;
+
+%% Inhibition 
+
+% pH
+if (pH_reactor < pH_UL_aa)
+   I_pH_aa = exp(-3.0*(pH_reactor-pH_UL_aa)*(pH_reactor-pH_UL_aa)/((pH_UL_aa-pH_LL_aa)*(pH_UL_aa-pH_LL_aa)));
+else
+   I_pH_aa = 1.0;
+end
+   
+if (pH_reactor < pH_UL_ac)
+   I_pH_ac = exp(-3.0*(pH_reactor-pH_UL_ac)*(pH_reactor-pH_UL_ac)/((pH_UL_ac-pH_LL_ac)*(pH_UL_ac-pH_LL_ac)));
+else
+   I_pH_ac = 1.0;
+end
+
+if (pH_reactor < pH_UL_h2)
+   I_pH_h2 = exp(-3.0*(pH_reactor-pH_UL_h2)*(pH_reactor-pH_UL_h2)/((pH_UL_h2-pH_LL_h2)*(pH_UL_h2-pH_LL_h2)));
+else
+   I_pH_h2 = 1.0;
+end
+
+% N
+I_IN_lim = 1.0/(1.0+K_S_IN/SIN);
+% h2
+I_h2_fa = 1.0/(1.0+Sh2/K_Ih2_fa);
+I_h2_c4 = 1.0/(1.0+Sh2/K_Ih2_c4);
+I_h2_pro = 1.0/(1.0+Sh2/K_Ih2_pro);
+I_h2_ac = 1.0/(1.0+Sh2/K_Ih2_ac);
+I_h2_c5 = 1.0/(1.0+Sh2/K_Ih2_c5);
+
+% NH3
+if (SNH3<= K_I_nh3_min_aceto)
+    I_nh3_aceto = 1.0;
+else
+    I_nh3_aceto = exp(-2.77259*(((SNH3- K_I_nh3_min_aceto)/(K_I_nh3_max_aceto-K_I_nh3_min_aceto))^2));
+end
+if (SNH3<= K_I_nh3_min_h2)
+    I_nh3_h2 = 1.0;
+else
+    I_nh3_h2 = exp((-2.77259*((SNH3- K_I_nh3_min_h2)/(K_I_nh3_max_h2-K_I_nh3_min_h2))^2));
+end
+
+% Function definition
+inhib(1) = I_pH_aa*I_IN_lim;
+inhib(2) = inhib(1)*I_h2_fa;
+inhib(3) = inhib(1)*I_h2_c4;
+inhib(4) = inhib(1)*I_h2_pro;
+inhib(5) = I_pH_ac*I_IN_lim*I_nh3_aceto;
+inhib(6) = I_pH_h2*I_IN_lim*I_nh3_h2; % !!!!!!!!! Same for both
+%inhib(7) = inhib(1);
+inhib(7) = inhib(1)*I_h2_ac; 
+inhib(8) = inhib(1)*I_h2_c5;
+
+%% Reaction rates
+% Disintegration and hydrolysis
+r1 = k_dis*Xc;
+r2 = k_hyd_ch*Xch;
+r3 = k_hyd_pr*Xpr;
+r4 = k_hyd_li*Xli;
+% Uptake reactions
+r5 = k_m_su*Ssu/(K_S_su+Ssu)*Xsu*inhib(1);
+r6 = k_m_aa*Saa/(K_S_aa+Saa)*Xaa*inhib(1);
+r7 = k_m_fa*Sfa/(K_S_fa+Sfa)*Xfa*inhib(2);
+r8 = k_m_c5*Sva/(K_S_c5+Sva)*Xc5*inhib(8); 
+r9 = k_m_c4*Sbu/(K_S_c4+Sbu)*Xc4*inhib(3); 
+r10 = k_m_pro*Spro/(K_S_pro+Spro)*Xpro*inhib(4);
+r11 = k_m_ac*Sac/(K_S_ac+Sac)*Xac*inhib(5);
+r12 = k_m_h2_slow_high*Sh2/(K_S_h2_slow_high+Sh2)*Xh2_slow_high*inhib(6);
+r20 = k_m_SAO*Sac/(K_S_SAO+Sac)*XSAO*inhib(7);
+r23 = k_m_h2_fast_low*Sh2/(K_S_h2_fast_low+Sh2)*Xh2_fast_low*inhib(6); % !!!!!!!!!!!!!
+% Decay
+r13 = k_dec_Xsu*Xsu;
+r14 = k_dec_Xaa*Xaa;
+r15 = k_dec_Xfa*Xfa;
+r16 = k_dec_Xc4*Xc4;
+r17 = k_dec_Xpro*Xpro;
+r18 = k_dec_Xac*Xac;
+r19 = k_dec_Xh2*Xh2_slow_high;
+r21 = k_dec_SAO*XSAO;
+r22 = k_dec_Xc5*Xc5;
+r24 = k_dec_Xh2*Xh2_fast_low; % !!!!!!!!!!!!!
+% Acid-base reactions
+rA4 = k_A_Bva*(Sva_*(K_a_va+S_H_ion)-K_a_va*Sva);
+rA5 = k_A_Bbu*(Sbu_*(K_a_bu+S_H_ion)-K_a_bu*Sbu);
+rA6 = k_A_Bpro*(Spro_*(K_a_pro+S_H_ion)-K_a_pro*Spro);
+rA7 = k_A_Bac*(Sac_*(K_a_ac+S_H_ion)-K_a_ac*Sac);
+rA10 = k_A_Bco2*(SHCO3_*(K_a_co2+S_H_ion)-K_a_co2*SIC);
+rA11 = k_A_BIN*(SNH3*(K_a_IN_corr+S_H_ion)-K_a_IN_corr*SIN);
+% Gas transfer 
+rh2 = kLa_H2*(Sh2-H2_sat);
+rch4 = kLa_CH4*(Sch4-CH4_sat);
+rco2 = kLa_CO2*((SIC-SHCO3_)-CO2_sat);
+rN2 = kLa_N2*(SN2-N2_sat);
+
+%% Stoichiometric coefficients
+v1_10 = -C_xc+f_xI_xc*C_xI+f_sI_xc*C_sI+f_ch_xc*C_ch+f_pr_xc*C_pr+f_li_xc*C_li;
+v1_11 = N_xc-f_xI_xc*N_I-f_sI_xc*N_I-f_pr_xc*N_aa;
+v1_12 = f_sI_xc;
+v1_13 = -1;
+v1_14 = f_ch_xc;
+v1_15 = f_pr_xc;
+v1_16 = f_li_xc;
+v1_24 = f_xI_xc;
+v2_1 = 1;
+v2_10 = -C_ch+C_su;
+v2_14 = -1;
+v3_2 = 1;
+v3_10 = -C_pr+C_aa;
+v3_11 = (N_pr-N_aa);
+v3_15 = -1;
+v4_1 = 1-f_fa_li;
+v4_3 = f_fa_li;
+v4_10 = -C_li+(1-f_fa_li)*C_su+f_fa_li*C_fa;
+v4_16 = -1;
+v5_1 = -1;
+v5_5 = (1-Y_su)*f_bu_su;
+v5_6 = (1-Y_su)*f_pro_su;
+v5_7 = (1-Y_su)*f_ac_su;
+v5_8 = (1-Y_su)*f_h2_su;
+v5_10 = -C_su+(1.0-Y_su)*(f_bu_su*C_bu+f_pro_su*C_pro+f_ac_su*C_ac)+Y_su*C_bac;
+v5_11 = -Y_su*N_bac;
+v5_17 = Y_su;
+v6_2 = -1;
+v6_4 = (1-Y_aa)*f_va_aa;
+v6_5 = (1-Y_aa)*f_bu_aa;
+v6_6 = (1-Y_aa)*f_pro_aa;
+v6_7 = (1-Y_aa)*f_ac_aa;
+v6_8 = (1-Y_aa)*f_h2_aa;
+v6_10 = -C_aa+(1.0-Y_aa)*(f_va_aa*C_va+f_bu_aa*C_bu+f_pro_aa*C_pro+f_ac_aa*C_ac)+Y_aa*C_bac;
+v6_11 = (N_aa-Y_aa*N_bac);
+v6_18 = Y_aa;
+v7_3 = -1;
+v7_7 = (1-Y_fa)*0.7;
+v7_8 = (1-Y_fa)*0.3;
+v7_10 = -C_fa+(1.0-Y_fa)*0.7*C_ac+Y_fa*C_bac;
+v7_11 = -Y_fa*N_bac;
+v7_19 = Y_fa;
+v8_4 = -1;
+v8_6 = (1-Y_c5)*0.54; 
+v8_7 = (1-Y_c5)*0.31; 
+v8_8 = (1-Y_c5)*0.15; 
+v8_10 = -C_va+(1.0-Y_c5)*0.54*C_pro+(1.0-Y_c5)*0.31*C_ac+Y_c5*C_bac; 
+v8_11 = -Y_c5*N_bac;
+v8_37 = Y_c5; 
+v9_5 = -1;
+v9_7 = (1-Y_c4)*0.8;
+v9_8 = (1-Y_c4)*0.2;
+v9_10 = -C_bu+(1.0-Y_c4)*0.8*C_ac+Y_c4*C_bac;
+v9_11 = -Y_c4*N_bac;
+v9_20 = Y_c4;
+v10_6 = -1;
+v10_7 = (1-Y_pro)*0.57;
+v10_8 = (1-Y_pro)*0.43;
+v10_10 = -C_pro+(1.0-Y_pro)*0.57*C_ac+Y_pro*C_bac;
+v10_11 = -Y_pro*N_bac;
+v10_21 = Y_pro;
+v11_7 = -1;
+v11_9 = (1-Y_ac);
+v11_10 = -C_ac+(1.0-Y_ac)*C_ch4+Y_ac*C_bac;
+v11_11 = -Y_ac*N_bac;
+v11_22 = Y_ac;
+v12_8 = -1;
+v12_9 = (1-Y_h2);
+v12_10 = (1.0-Y_h2)*C_ch4+Y_h2*C_bac;
+v12_11 = -Y_h2*N_bac;
+v12_23 = Y_h2;
+v13_13 = 1;
+v13_17 = -1;
+v14_13 = 1;
+v14_18 = -1;
+v15_13 = 1;
+v15_19 = -1;
+v16_13 = 1;
+v16_20 = -1;
+v17_13 = 1;
+v17_21 = -1;
+v18_13 = 1;
+v18_22 = -1;
+v19_13 = 1;
+v19_23 = -1;
+v20_7 = -1;
+v20_8 = (1-Y_SAO);
+v20_10 = -C_ac+Y_SAO*C_bac;
+v20_11 = -Y_SAO*N_bac;
+v20_36 = Y_SAO;
+v21_13 = 1;
+v21_36 = -1;
+v22_37 = -1; 
+v23_8 = -1;  %!!!!!!!!!!!!!!!!!!!!
+v23_9 = (1-Y_h2);  %!!!!!!!!!!!!!!!!!!!!
+v23_10 = (1.0-Y_h2)*C_ch4+Y_h2*C_bac;  %!!!!!!!!!!!!!!!!!!!!
+v23_11 = -Y_h2*N_bac;  %!!!!!!!!!!!!!!!!!!!!
+v23_38 = Y_h2;  %!!!!!!!!!!!!!!!!!!!!
+v24_38 = -1;  %!!!!!!!!!!!!!!!!!!!!
+v24_13 = 1;  %!!!!!!!!!!!!!!!!!!!!
+
+vdecay_10 = -C_bac+C_xc;
+vdecay_11 = N_bac-N_xc;
+
+f(1) = u(39)./Vliq*(u(1)-Ssu)+v2_1*r2+v4_1*r4+v5_1*r5;
+f(2) = u(39)./Vliq*(u(2)-Saa)+v3_2*r3+v6_2*r6;
+f(3) = u(39)./Vliq*(u(3)-Sfa)+v4_3*r4+v7_3*r7;    
+f(4) = u(39)./Vliq*(u(4)-Sva)+v6_4*r6+v8_4*r8; 
+f(5) = u(39)./Vliq*(u(5)-Sbu)+v5_5*r5+v6_5*r6+v9_5*r9;     
+f(6) = u(39)./Vliq*(u(6)-Spro)+v5_6*r5+v6_6*r6+v8_6*r8+v10_6*r10;     
+f(7) = u(39)./Vliq*(u(7)-Sac)+v5_7*r5+v6_7*r6+v7_7*r7+v8_7*r8+v9_7*r9...
+    +v10_7*r10+v11_7*r11+v20_7*r20;
+f(8) = u(39)./Vliq*(u(8)-Sh2)+v5_8*r5+v6_8*r6+v7_8*r7+v8_8*r8+v9_8*r9...
+    +v10_8*r10+v12_8*r12+v23_8*r23+v20_8*r20-rh2;%!!!!!!!!!!!!!!!!!!!!
+f(9) = u(39)./Vliq*(u(9)-Sch4)+v11_9*r11+v12_9*r12+v23_9*r23-rch4; %!!!!!!!!!!!!!!!!!!!!
+f(10) = u(39)./Vliq*(u(10)-SIC)-(v1_10*r1+v2_10*r2+v3_10*r3+v4_10*r4...
+    +v5_10*r5+v6_10*r6+v7_10*r7+v8_10*r8+v9_10*r9+v10_10*r10+v11_10*r11...
+    +v12_10*r12+v23_10*r23+v20_10*r20...
+    +vdecay_10*(r13+r14+r15+r16+r17+r18+r19+r21+r24))-rco2; %!!!!!!!!!!!!!!!!!!!!
+f(11) = u(39)./Vliq*(u(11)-SIN)+v1_11*r1+v3_11*r3+v5_11*r5+v6_11*r6...
+    +v7_11*r7+v8_11*r8+v9_11*r9+v10_11*r10+v11_11*r11+v12_11*r12...
+    +v23_11*r23+v20_11*r20+vdecay_11*(r13+r14+r15+r16+r17+r18+r19+r21+r24);%!!!!!!!!!!!!!!!!!!!!
+f(12) = u(39)./Vliq*(u(12)-SI)+v1_12*r1;
+f(13) = u(39)./Vliq*(u(13)-Xc)+v1_13*r1+v13_13*r13+v14_13*r14+v15_13*r15...
+    +v16_13*r16+v17_13*r17+v18_13*r18+v19_13*r19+v21_13*r21+v24_13*r24;%!!!!!!!!!!!!!!!!!!!!
+f(14) = u(39)./Vliq*(u(14)-Xch)+v1_14*r1+v2_14*r2;
+f(15) = u(39)./Vliq*(u(15)-Xpr)+v1_15*r1+v3_15*r3;
+f(16) = u(39)./Vliq*(u(16)-Xli)+v1_16*r1+v4_16*r4;
+f(17) = u(39)./Vliq*(u(17)-Xsu)+v5_17*r5+v13_17*r13;
+f(18) = u(39)./Vliq*(u(18)-Xaa)+v6_18*r6+v14_18*r14;
+f(19) = u(39)./Vliq*(u(19)-Xfa)+v7_19*r7+v15_19*r15;
+f(20) = u(39)./Vliq*(u(20)-Xc4)+v9_20*r9+v16_20*r16;
+f(21) = u(39)./Vliq*(u(21)-Xpro)+v10_21*r10+v17_21*r17;
+f(22) = u(39)./Vliq*(u(22)-Xac)+v11_22*r11+v18_22*r18;
+f(23) = u(39)./Vliq*(u(23)-Xh2_slow_high)+v12_23*r12+v19_23*r19;
+f(24) = u(39)./Vliq*(u(24)-XI)+v1_24*r1;
+f(25) = u(39)./Vliq*(u(25)-Scat);   
+f(26) = u(39)./Vliq*(u(26)-San);      
+f(27) = -rA4;                           % Sva- 
+f(28) = -rA5;                           % Sbu- 
+f(29) = -rA6;                           % Spro- 
+f(30) = -rA7;                           % Sac- 
+f(31) = -rA10;                          % SHCO3- 
+f(32) = -rA11;                          % SNH3 
+f(33) = u(40)*u(41)/Vgas-H2_gas*u(43)/Vgas+rh2*Vliq/Vgas; %H2 !!!!!!!!!!!!!!!!!!!!
+f(34) = -CH4_gas*u(43)/Vgas+rch4*Vliq/Vgas; %Assuming no CH4 input !!!!!!!!!!!!!!!!!!!!
+f(35) = u(40)*u(42)/Vgas-CO2_gas*u(43)/Vgas+rco2*Vliq/Vgas; %CO2 !!!!!!!!!!!!!!!!!!!!
+f(36) = u(39)./Vliq*(u(36)-XSAO)+v20_36*r20+v21_36*r21; % SAO
+f(37) = u(39)./Vliq*(u(37)-Xc5)+v8_37*r8+v22_37*r22; % Xc5
+f(38) = u(39)./Vliq*(u(38)-Xh2_fast_low)+v23_38*r23+v24_38*r24; % xh2_fast_low !!!!!!!!!!!!!!!!!!!!
+f(39) = u(39)./Vliq*(u(44)-SN2)-rN2; %!!!!!!!!!!!!!!!!!!!!
+f(40) = -N2_gas*u(43)/Vgas+rN2*Vliq/Vgas; %Assuming no N2 in input !!!!!!!!!!!!!!!!!!!!
+
+f = f';
+
+   if nargout > 1
+       pHout = pH_list(1:(end-1),:);
+       tout = t_list(1:(end-1),:);
+   end
+end
