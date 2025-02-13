@@ -1,0 +1,357 @@
+%% PLOTFILE for the biometh model
+%-------------------------------------------------------------------------
+% 19/06/2024 Author: Gabriel Capson-Tojo (gabriel.capson-tojo@inrae.fr) 
+%-------------------------------------------------------------------------
+
+%Load experimental results
+data_exp_gas = csvread('biometh_HPr_results_gas.csv');%[t,H2_gas,CH4_gas,CO2_gas,P_gas]
+data_exp_vfa = csvread('biometh_HPr_results_vfa.csv');%[t,Ac,Pro,Bu,Val]
+texp_gas = data_exp_gas(:,1);
+H2_gas_exp = data_exp_gas(:,2);
+CH4_gas_exp = data_exp_gas(:,3);
+CO2_gas_exp = data_exp_gas(:,4);
+P_gas_exp = data_exp_gas(:,5); 
+texp_vfa = data_exp_vfa(:,1);
+Ac_exp = data_exp_vfa(:,2);
+Pro_exp = data_exp_vfa(:,3);
+Bu_exp = data_exp_vfa(:,4);
+Val_exp = data_exp_vfa(:,5);
+VFA_exp = Ac_exp + Pro_exp + Bu_exp + Val_exp;
+
+% Function call for pH and to save results
+ StateMatrix = y;
+ [yy,ts,pHs]=biometh_adm1_batch(t(1),y(1,:),tu,feed,Vliq,Vgas);
+ 
+% Calculation of general outputs
+VFA_tot = y(:,4)+y(:,5)+y(:,6)+y(:,7);
+kLa = 10*24;
+kLa_H2 = kLa*(((5.11*10^-5)/(2.42*10^-5))^(1/2));
+R = 0.08314;
+T_base = 298.15;
+T_op = 273.15+35;
+P_atm = 1.013;
+K_H_h2o_base = 0.0313;
+% Gas
+p_gas_h2o = K_H_h2o_base*exp(5290.0*(1.0/T_base - 1.0/T_op));
+p_gas_h2  = y(:,33).*R.*T_op./16.0;
+p_gas_ch4 = y(:,34).*R.*T_op./64.0;
+p_gas_co2 = y(:,35).*R.*T_op;
+p_gas_N2 = y(:,40)*R*T_op;
+%P_gas = p_gas_h2 + p_gas_ch4 + p_gas_co2 + p_gas_N2 + p_gas_h2o;
+P_gas = p_gas_h2 + p_gas_ch4 + p_gas_co2 + p_gas_N2;
+Fraction_CO2 = 100.*(p_gas_co2./P_gas);
+Fraction_CH4 = 100.*(p_gas_ch4./P_gas);
+Fraction_H2 = 100.*(p_gas_h2./P_gas);
+Fraction_N2 = 100.*(p_gas_N2./P_gas);
+% Calculations for rates
+K_H_h2_base = 0.00078;
+factor = (1.0/T_base - 1.0/T_op)/(100.0*R);
+K_H_h2 = K_H_h2_base*exp(-4180.0*factor);
+H2_sat = K_H_h2.*p_gas_h2*16;
+Supply = kLa_H2.*(H2_sat-y(:,8)); %Reversed
+k_m_h2_slow_high = 12;  
+k_m_h2_fast_low = 34.9;
+K_S_h2_slow_high = 7e-8;
+K_S_h2_fast_low = 1e-5;
+%% Inhibitions
+K_S_IN = 1e-4;
+I_IN_lim = 1.0./(1.0+K_S_IN./y(:,11));
+K_I_nh3_min_h2 = 0.175/14;
+K_I_nh3_max_h2 = 4.387/14;
+if (y(:,32)<= K_I_nh3_min_h2)
+    I_nh3_h2 = 1.0;
+else
+    I_nh3_h2 = exp((-2.77259.*((y(:,32)- K_I_nh3_min_h2)./(K_I_nh3_max_h2-K_I_nh3_min_h2)).^2));
+end
+pH_UL_h2 = 6;
+pH_LL_h2 = 5;
+phi = y(:,25)+(y(:,11)-y(:,32))-y(:,31)-y(:,30)/64.0-y(:,29)/112.0-y(:,28)/160.0-y(:,27)/208.0-y(:,26);
+pK_w_base = 14.0;
+K_w = 10^(-pK_w_base)*exp(55900.0*factor);
+S_H_ion = -phi.*0.5+0.5*sqrt(phi.*phi+4.0*K_w);       % SH+ 
+pH_reactor = -log10(S_H_ion);
+I_pH_h2 = exp((-3.0 .* (pH_reactor(:,1) - pH_UL_h2) .^ 2) ./ ((pH_UL_h2 - pH_LL_h2) .^ 2));
+I_pH_h2(pH_reactor(:,1) > pH_UL_h2) = 1.0;
+inhib = I_pH_h2.*I_IN_lim.*I_nh3_h2;
+r12 = k_m_h2_slow_high.*(y(:,8)./(K_S_h2_slow_high+y(:,8))).*y(:,23).*inhib;
+r23 = k_m_h2_fast_low.*(y(:,8)./(K_S_h2_fast_low+y(:,8))).*y(:,38).*inhib;
+Uptake = r12+r23;
+
+% Plots
+figure(1)
+    subplot(2,1,1)   
+    plot(t,y(:,23),'r');
+    grid;
+    title('Hydrogenotrophs (kg COD/m3)');
+    ylabel('XH_2 slow high');
+    xlabel('Time (d)');
+    subplot(2,1,2)
+    plot(t,y(:,38),'r');
+    grid;
+    ylabel('XH_2 fast low');
+    xlabel('Time (days)');
+    
+figure(2)
+    subplot(4,1,1)
+    plot(texp_gas,H2_gas_exp,'o')
+    hold on;
+    plot(t,y(:,33),'r');
+    hold off;
+    grid;
+    title('Gas composition');
+    ylabel('H_2 gas (kg COD/m3)');
+    xlabel('Time (d)');
+    %ylim([0 0.06]);
+    
+    subplot(4,1,2)
+    plot(texp_gas,CH4_gas_exp,'o')
+    hold on;
+    plot(t,y(:,34),'r');
+    hold off;
+    grid;
+    ylabel('CH_4 gas (kg COD/m3)');
+    xlabel('Time (d)');
+    
+    subplot(4,1,3)
+    plot(texp_gas,CO2_gas_exp,'o')
+    hold on;
+    plot(t,y(:,35),'r');
+    hold off;
+    grid;
+    ylabel('CO_2 gas (kgmol/m3)');
+    xlabel('Time (d)');
+
+    subplot(4,1,4)
+    %plot(texp_gas,N2_gas_exp,'o')
+    %hold on;
+    plot(t,y(:,40),'r');
+    %hold off;
+    grid;
+    ylabel('N_2 gas (kgmol/m3)');
+    xlabel('Time (d)');
+    
+figure(3)
+    plot(texp_gas,P_gas_exp,'o')
+    hold on;
+    plot(t,P_gas,'r')
+    hold off;
+    grid;
+    title('Headspace pressure');
+    ylabel('P(bar)');
+
+figure(4)
+    subplot(5,1,1)
+    plot(texp_vfa,VFA_exp,'o')
+    hold on;
+    plot(t,VFA_tot,'r')
+    hold off;
+    grid;
+    title('VFAs ( Kg COD/m3)');
+    ylabel('Total VFAs');
+      
+    subplot(5,1,2)
+    plot(texp_vfa,Ac_exp,'o')
+    hold on;
+    plot(t,y(:,7),'r');
+    hold off;
+    grid;
+    ylabel('acetic acid');
+    
+    subplot(5,1,3)
+    plot(texp_vfa,Pro_exp,'o')
+    hold on;
+    plot(t,y(:,6),'r');
+    hold off;
+    grid;
+    ylabel('propionic acid');
+    
+    subplot(5,1,4)
+    plot(texp_vfa,Bu_exp,'o')
+    hold on;
+    plot(t,y(:,5),'r');
+    hold off;
+    grid;
+    ylabel('butyric acid');
+
+    subplot(5,1,5)
+    plot(texp_vfa,Val_exp,'o')
+    hold on;
+    plot(t,y(:,4),'r');
+    hold off;
+    grid;
+    ylabel('valeric acid');
+
+figure(5)
+    subplot(3,1,1)
+    plot(t,y(:,10),'r');
+    grid;
+    title('Substrates and Nutrients');
+    ylabel('IC conc. (Kmol C/m3)');
+    xlabel('Time (d)');
+    
+    subplot(3,1,2)
+    plot(t,y(:,8),'r');
+    grid;
+    ylabel('H_2soluble (kg COD/m3)');
+    xlabel('Time (d)');
+    
+    subplot(3,1,3)
+    plot(t,y(:,11),'r');
+    grid;
+    ylabel('IN conc. (kmol N/m3)');
+    xlabel('Time (d)');
+
+figure(6)
+    subplot(2,1,1)
+    plot(t,Supply,'r');
+    grid;
+    title('Rates H_2');
+    ylabel('Supply (kg COD/m3/d)');
+    xlabel('Time (d)');
+    
+    subplot(2,1,2)
+    plot(t,Uptake,'r');
+    grid;
+    ylabel('Uptake (kg COD/m3/d)');
+    xlabel('Time (d)');
+    
+figure(7)
+    plot(t,Supply,'r');
+    grid;
+    ylabel('H_2 rates (kg COD/m3/d)');
+    xlabel('Time (d)');
+    hold on
+    plot(t,Uptake,'b--');
+    legend('Supply','Uptake')
+    hold off
+
+figure(8)
+    plot(t,y(:,8),'r');
+    grid;
+    ylabel('H_2 (kg COD/m3)');
+    xlabel('Time (d)');
+    hold on
+    plot(t,H2_sat,'b--');
+    legend('H_2 soluble', 'H_2 sat')
+    hold off
+
+figure(9)
+     plot(ts,pHs,'r');
+     ylabel('pH');
+     xlabel('Time (d)');
+     ylim([4 11]);  
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Extra stuff     
+     
+figure(10)
+     subplot(4,1,1)
+     grid
+     plot(t,y(:,13),'r');
+     title('Particulate substrates (Kg COD/m3)')
+     ylabel('Xc');
+     xlabel('Time (days)');  
+     
+     subplot(4,1,2)    
+     grid
+     plot(t,y(:,14),'r');
+     title('Particulate substrates (Kg COD/m3)')
+     ylabel('Xch');
+     xlabel('Time (days)');    
+     
+     subplot(4,1,3)    
+     grid
+     plot(t,y(:,15),'r');
+     title('Particulate substrates (Kg COD/m3)')
+     ylabel('Xpr');
+     xlabel('Time (days)');  
+    
+     subplot(4,1,4)    
+     grid
+     plot(t,y(:,16),'r');
+     title('Particulate substrates (Kg COD/m3)')
+     ylabel('Xli');
+     xlabel('Time (days)');  
+ 
+figure(11)
+    subplot(3,1,1)
+    grid
+    plot(t,y(:,1),'r');
+    title('Soluble substrates (Kg COD/m3)');
+    ylabel('Ssu');
+    xlabel('Time (days)');
+     
+    subplot(3,1,2)
+    plot(t,y(:,2),'r');
+    grid;
+    ylabel('Saa');
+    xlabel('Time (days)');
+     
+    subplot(3,1,3)
+    plot(t,y(:,3),'r');
+    grid;
+    ylabel('Sfa');
+    xlabel('Time (days)');
+    
+figure(12)
+     
+     subplot(2,1,1)
+     plot(t,y(:,24),'r');
+     grid
+     title('Inert accumulation ( Kg COD/m3)');
+     ylabel('Xi');
+     xlabel('Time (days)');
+     
+     subplot(2,1,2)
+     plot(t,y(:,12),'r');
+     grid
+     ylabel('Si');
+     xlabel('Time (days)');
+    
+ figure(13)  
+     subplot(4,2,1)
+     grid
+     plot(t,y(:,17),'r');
+     ylabel('Xsu');
+     xlabel('Time (days)');
+     
+     subplot(4,2,2)
+     grid
+     plot(t,y(:,18),'r');
+     ylabel('Xaa');
+     xlabel('Time (days)');
+     
+     subplot(4,2,3)
+     grid
+     plot(t,y(:,19),'r');
+     ylabel('Xfa');
+     xlabel('Time (days)');
+ 
+     subplot(4,2,4)
+     plot(t,y(:,20),'r');
+     ylabel('Xc4');
+     xlabel('Time (days)');       
+     
+     subplot(4,2,5)
+     grid
+     plot(t,y(:,21),'r');
+     ylabel('Xpro');
+     xlabel('Time (days)');
+     
+     subplot(4,2,6)
+     grid
+     plot(t,y(:,22),'r');
+     ylabel('Xac');
+     xlabel('Time (days)');
+     
+     subplot(4,2,7)
+     grid
+     plot(t,y(:,23),'r');
+     ylabel('Xh2');
+     xlabel('Time (days)');  
+    
+     subplot(4,2,8)
+     grid
+     plot(t,y(:,36),'r');
+     title('Active SAO (Kg COD/m3)');
+     ylabel('SAO (Kg COD/m3)');
+     xlabel('Time (days)');
