@@ -1,0 +1,83 @@
+% Written by Dr. Gabriel Capson-Tojo (gabriel.capson-tojo@inrae.fr)
+% Last version: 19/06/2024
+
+close all
+clear all
+clc
+
+data = csvread('dynamic_Influent_HPr_inj.csv'); 
+data_t0 = csvread('initial_data_HPr_inj.csv');
+tu = data(:,1); % Time (t) to which raw input (u) is mapped
+
+Vliq = 0.1785/1000; % (m3) 0.202 for AD; 0.1785 Biometh
+Vgas = 1.0555/1000; % 1.043 for AD; 1.0555 Biometh
+
+%% Influent; time = data(:,1)
+Ssu = data(:,2);
+Saa = data(:,3);
+Sfa = data(:,4);
+Sva = data(:,5);
+Sbu = data(:,6);
+Spro = data(:,7);
+Sac = data(:,8);
+Sh2 = data(:,9);
+Sch4 = data(:,10);
+SIC = data(:,11);
+SIN = data(:,12);
+SI = data(:,13);
+Xc = data(:,14);
+Xch = data(:,15);
+Xpr = data(:,16);
+Xli = data(:,17);
+Xsu = data(:,18); 
+Xaa = data(:,19);
+Xfa = data(:,20);
+Xc4 = data(:,21);% all biomass concentrations from continuous simulation solution (previous batch)
+Xpro = data(:,22); 
+Xac = data(:,23);
+Xh2_slow_high = data(:,24);
+XI = data(:,25);
+Scat = data(:,26); 
+San = data(:,27);
+Sva_ = data(:,28);
+Sbu_ = data(:,29);
+Spro_ = data(:,30);
+Sac_ = data(:,31);
+SHCO3_ = data(:,32); 
+SNH3 = data(:,33);
+H2_gas = data(:,34);
+CH4_gas = data(:,35);
+CO2_gas = data(:,36);
+XSAO = data(:,37);
+Xc5 = data(:,38);
+Xh2_fast_low = data(:,39); % !!!!!!!!!!!!!!
+SN2 = data(:,45);
+N2_gas = data(:,46);
+
+% Flowrates
+QinVec = data(:,40);
+QinG = data(:,41);
+H2inG = data(:,42);
+CO2inG = data(:,43);
+QoutG = data(:,44);
+
+% Order of variables in model (u); QinVec = u(39)
+feed = [Ssu,Saa,Sfa,Sva,Sbu,Spro,Sac,Sh2,Sch4,SIC,SIN,SI,Xc,Xch,Xpr,Xli,Xsu,Xaa,...
+    Xfa,Xc4,Xpro,Xac,Xh2_slow_high,XI,Scat,San,Sva_,Sbu_,Spro_,Sac_,SHCO3_,...
+    SNH3,H2_gas,CH4_gas,CO2_gas,XSAO,Xc5,Xh2_fast_low...
+    QinVec,QinG,H2inG,CO2inG,QoutG...
+    SN2,N2_gas];
+
+y0 = data_t0(1,1:40);
+
+tvec = [0,19.9];
+
+%% Solve model
+%OPTIONS = odeset('RelTol',1e-9); 
+OPTIONS = odeset('RelTol',1e-12,'AbsTol',1e-12);
+tic
+[t,y] = ode15s(@(t,y)biometh_adm1_batch(t,y,tu,feed,Vliq,Vgas),tvec,y0,OPTIONS);
+toc
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+plots_biometh_batch
